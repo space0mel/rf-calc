@@ -32,6 +32,7 @@ Requires Python 3.8+. Uses only the standard library.
 | `db` | dB / dBm / power / voltage ratio conversions |
 | `loss` | Free-space path loss (Friis equation) |
 | `smith` | Normalize impedance for Smith Chart plotting |
+| `coax` | Coaxial cable specs + loss calculator (13 cables) |
 
 ## Examples
 
@@ -149,6 +150,32 @@ $ rf-calc smith --z 100+j50
 $ rf-calc input-z --zl 0 --z0 50 --freq 1G --distance 0.075
 
   Z_in: huge (quarter-wave transformer turns short → open)
+```
+
+### Coaxial cable loss — 30m of RG-58 at 2.4 GHz
+
+```
+$ rf-calc coax RG-58 --freq 2.4G --length 30
+
+  Total loss: 24.06 dB
+  Power at far end: 0.4% of input
+
+  Cable comparison at same freq/length:
+    LMR-600         4.29dB      37.2%   50Ω
+    LMR-400         6.60dB      21.9%   50Ω
+    RG-58          24.06dB       0.4%   50Ω ◀
+```
+
+### List all cables in the database
+
+```
+$ rf-calc coax list
+
+  Cable           Z₀     VF       OD Use
+  RG-6           75Ω   82%   6.86mm Cable TV, satellite, CATV distribution
+  RG-58          50Ω   66%   4.95mm General purpose 50Ω, lab interconnects
+  LMR-400        50Ω   85%  10.29mm Low-loss, cellular towers, long Wi-Fi runs
+  ...13 cables total
 ```
 
 ## Frequency input format
