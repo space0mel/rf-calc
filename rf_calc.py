@@ -13,7 +13,7 @@ import math
 import sys
 from typing import Optional
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 C = 299_792_458        # speed of light in vacuum (m/s)
@@ -515,6 +515,82 @@ def cmd_smith(args):
         print(f"\n  ⚠ High mismatch — consider matching network")
 
 
+def cmd_link_budget(args):
+    """Calculate a complete RF link budget."""
+    f = _parse_freq(args.freq)
+    d = args.distance
+
+    # Transmitter
+    tx_power_dbm = args.tx_power  # dBm
+    tx_cable_loss = args.tx_cable_loss if args.tx_cable_loss else 0  # dB
+    tx_ant_gain = args.tx_gain if args.tx_gain else 0  # dBi
+
+    # Receiver
+    rx_cable_loss = args.rx_cable_loss if args.rx_cable_loss else 0  # dB
+    rx_ant_gain = args.rx_gain if args.rx_gain else 0  # dBi
+    rx_sensitivity = args.rx_sensitivity  # dBm (optional)
+
+    # Additional losses
+    misc_loss = args.misc_loss if args.misc_loss else 0  # dB
+
+    # Calculate FSPL
+    lam = C / f
+    fspl_db = 20 * math.log10(4 * math.pi * d / lam)
+
+    # EIRP = Tx Power - Tx Cable Loss + Tx Antenna Gain
+    eirp = tx_power_dbm - tx_cable_loss + tx_ant_gain
+
+    # Received power = EIRP - FSPL + Rx Antenna Gain - Rx Cable Loss - Misc Loss
+    rx_power = eirp - fspl_db + rx_ant_gain - rx_cable_loss - misc_loss
+
+    _header("Link Budget")
+
+    print("  TRANSMITTER")
+    _show("Tx Power", f"{tx_power_dbm:.1f} dBm  ({_eng(10**((tx_power_dbm-30)/10), 'W')})", 4)
+    _show("Tx Cable Loss", f"-{tx_cable_loss:.1f} dB", 4)
+    _show("Tx Antenna Gain", f"+{tx_ant_gain:.1f} dBi", 4)
+    _show("EIRP", f"{eirp:.1f} dBm  ({_eng(10**((eirp-30)/10), 'W')})", 4)
+
+    print()
+    print("  PATH")
+    _show("Frequency", _eng(f, "Hz"), 4)
+    _show("Distance", _eng(d, "m"), 4)
+    _show("Wavelength", _eng(lam, "m"), 4)
+    _show("Free-Space Path Loss", f"-{fspl_db:.2f} dB", 4)
+    if misc_loss > 0:
+        _show("Miscellaneous Losses", f"-{misc_loss:.1f} dB", 4)
+
+    print()
+    print("  RECEIVER")
+    _show("Rx Antenna Gain", f"+{rx_ant_gain:.1f} dBi", 4)
+    _show("Rx Cable Loss", f"-{rx_cable_loss:.1f} dB", 4)
+
+    print()
+    print("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    _show("Received Power", f"{rx_power:.2f} dBm  ({_eng(10**((rx_power-30)/10), 'W')})", 2)
+
+    if rx_sensitivity is not None:
+        margin = rx_power - rx_sensitivity
+        _show("Rx Sensitivity", f"{rx_sensitivity:.1f} dBm", 2)
+        _show("Link Margin", f"{margin:.2f} dB", 2)
+        if margin > 10:
+            print(f"\n  ✅ Healthy link margin ({margin:.1f} dB > 10 dB)")
+        elif margin > 0:
+            print(f"\n  ⚠ Thin margin ({margin:.1f} dB) — may be unreliable in practice")
+        else:
+            print(f"\n  ❌ Link FAILS — {abs(margin):.1f} dB below sensitivity")
+
+    # Show max range for this link
+    if rx_sensitivity is not None:
+        # Solve for max d where rx_power = rx_sensitivity
+        # rx_power = eirp - 20*log10(4πd/λ) + rx_ant_gain - rx_cable_loss - misc_loss
+        # => 20*log10(4πd/λ) = eirp + rx_ant_gain - rx_cable_loss - misc_loss - rx_sensitivity
+        max_fspl = eirp + rx_ant_gain - rx_cable_loss - misc_loss - rx_sensitivity
+        if max_fspl > 0:
+            max_d = lam * 10 ** (max_fspl / 20) / (4 * math.pi)
+            print(f"  📏 Maximum range: {_eng(max_d, 'm')} (0 dB margin)")
+
+
 def _interp_atten(atten_data: dict, freq: float) -> Optional[float]:
     """Interpolate attenuation from frequency/dB-per-100m data points."""
     freqs = sorted(atten_data.keys())
@@ -642,6 +718,7 @@ examples:
   rf-calc loss --freq 2.4G --distance 100  Free-space loss at 100m
   rf-calc smith --z 100+j50             Normalize for Smith Chart (default Z₀=50Ω)
   rf-calc input-z --zl 100+j50 --z0 50 --freq 1G --distance 0.1
+  rf-calc link-budget --freq 2.4G --distance 1000 --tx-power 20 --tx-gain 6 --rx-gain 3 --rx-sensitivity -80
   rf-calc coax list                      Show all cables in database
   rf-calc coax RG-58 --freq 2.4G        RG-58 specs + loss at 2.4 GHz
   rf-calc coax LMR-400 --freq 900M --length 30  Total loss for 30m LMR-400
@@ -715,6 +792,19 @@ examples:
     p.add_argument("--z", required=True, help="Impedance to normalize (e.g., 100+j50)")
     p.add_argument("--z0", help="Reference impedance (default: 50Ω)")
     p.set_defaults(func=cmd_smith)
+
+    # link budget
+    p = sub.add_parser("link-budget", help="Complete RF link budget calculator", aliases=["link"])
+    p.add_argument("--freq", required=True, help="Frequency")
+    p.add_argument("--distance", type=float, required=True, help="Distance (m)")
+    p.add_argument("--tx-power", type=float, required=True, help="Transmitter power (dBm)")
+    p.add_argument("--tx-gain", type=float, help="Tx antenna gain (dBi, default: 0)")
+    p.add_argument("--tx-cable-loss", type=float, help="Tx cable loss (dB, default: 0)")
+    p.add_argument("--rx-gain", type=float, help="Rx antenna gain (dBi, default: 0)")
+    p.add_argument("--rx-cable-loss", type=float, help="Rx cable loss (dB, default: 0)")
+    p.add_argument("--rx-sensitivity", type=float, help="Receiver sensitivity (dBm) — enables margin calc")
+    p.add_argument("--misc-loss", type=float, help="Additional losses (dB, default: 0)")
+    p.set_defaults(func=cmd_link_budget)
 
     # coaxial cable lookup
     p = sub.add_parser("coax", help="Coaxial cable specs + loss calculator (13 cables)", aliases=["cable"])
