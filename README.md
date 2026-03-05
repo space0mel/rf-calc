@@ -32,6 +32,10 @@ Requires Python 3.8+. Uses only the standard library.
 | `db` | dB / dBm / power / voltage ratio conversions |
 | `loss` | Free-space path loss (Friis equation) |
 | `smith` | Normalize impedance for Smith Chart plotting |
+| `link-budget` | Complete RF link budget (EIRP, margin, max range) |
+| `fresnel` | Fresnel zone radius calculator with path profile |
+| `noise` | Cascaded noise figure (Friis formula) |
+| `antenna` | Antenna element lengths + impedance + gain reference |
 | `coax` | Coaxial cable specs + loss calculator (13 cables) |
 
 ## Examples
@@ -150,6 +154,54 @@ $ rf-calc smith --z 100+j50
 $ rf-calc input-z --zl 0 --z0 50 --freq 1G --distance 0.075
 
   Z_in: huge (quarter-wave transformer turns short → open)
+```
+
+### Link budget — WiFi access point at 1 km
+
+```
+$ rf-calc link-budget --freq 2.4G --distance 1000 --tx-power 20 --tx-gain 6 --rx-gain 3 --rx-sensitivity -80
+
+  EIRP: 26.0 dBm  (398.1 mW)
+  Free-Space Path Loss: -100.05 dB
+  Received Power: -71.05 dBm  (78.49 pW)
+  Link Margin: 8.95 dB
+  ⚠ Thin margin (8.9 dB) — may be unreliable in practice
+  📏 Maximum range: 2.802 km (0 dB margin)
+```
+
+### Fresnel zone — 5.8 GHz link over 10 km
+
+```
+$ rf-calc fresnel --freq 5.8G --distance 10000
+
+  F1 max radius (midpoint): 11.37 m
+  60% clearance (practical minimum): 6.821 m
+
+  Radius along path:
+    Position    Distance      Radius
+         10%        1 km     6.821 m
+         50%        5 km     11.37 m
+         90%        9 km     6.821 m
+```
+
+### Cascaded noise figure — LNA + Filter + Mixer
+
+```
+$ rf-calc noise 20,1.5 -3,3 30,5 --labels LNA Filter Mixer
+
+  Cascaded NF: 1.66 dB (F = 1.466)
+  Noise temperature: 135.0 K
+  ⚠ If stages 1 & 2 were swapped: NF would be 4.50 dB (worse by 2.84 dB)
+```
+
+### Antenna lengths — 2m ham radio (146 MHz)
+
+```
+$ rf-calc antenna --freq 146M --gain
+
+  Half-wave dipole (λ/2):         1.027 m
+  Quarter-wave monopole (λ/4):   513.3 mm
+  Practical (×0.95):             487.7 mm
 ```
 
 ### Coaxial cable loss — 30m of RG-58 at 2.4 GHz
