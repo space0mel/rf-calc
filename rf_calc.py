@@ -13,13 +13,97 @@ import math
 import sys
 from typing import Optional
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 C = 299_792_458        # speed of light in vacuum (m/s)
 MU_0 = 4e-7 * math.pi # permeability of free space (H/m)
 EPS_0 = 8.854187817e-12  # permittivity of free space (F/m)
 ETA_0 = 376.730313668  # impedance of free space (Ω)
+
+# ── Coaxial Cable Database ─────────────────────────────────────────────────────
+# Format: name → {z0, vf, od_mm, cap_pf_m, atten_db_100m @ freq pairs}
+# Data from manufacturer datasheets (Belden, Times Microwave, etc.)
+COAX_DB = {
+    "RG-6": {
+        "z0": 75, "vf": 0.82, "od_mm": 6.86,
+        "cap_pf_m": 67.3, "shield": "foil+braid",
+        "use": "Cable TV, satellite, CATV distribution",
+        "atten": {100e6: 6.6, 400e6: 13.1, 1e9: 21.3, 2e9: 31.2},
+    },
+    "RG-8": {
+        "z0": 50, "vf": 0.66, "od_mm": 10.29,
+        "cap_pf_m": 96.8, "shield": "braid",
+        "use": "HF/VHF ham radio, base station feedlines",
+        "atten": {100e6: 6.3, 400e6: 13.8, 1e9: 23.6},
+    },
+    "RG-11": {
+        "z0": 75, "vf": 0.66, "od_mm": 10.29,
+        "cap_pf_m": 67.3, "shield": "braid",
+        "use": "Long CATV runs, trunk lines",
+        "atten": {100e6: 4.3, 400e6: 9.2, 1e9: 15.4},
+    },
+    "RG-58": {
+        "z0": 50, "vf": 0.66, "od_mm": 4.95,
+        "cap_pf_m": 93.5, "shield": "braid",
+        "use": "General purpose 50Ω, lab interconnects, Wi-Fi pigtails",
+        "atten": {100e6: 13.5, 400e6: 27.6, 1e9: 47.2, 3e9: 88.6},
+    },
+    "RG-59": {
+        "z0": 75, "vf": 0.66, "od_mm": 6.15,
+        "cap_pf_m": 67.3, "shield": "braid",
+        "use": "Video, short CATV runs, legacy analog",
+        "atten": {100e6: 11.2, 400e6: 22.3, 1e9: 38.4},
+    },
+    "RG-142": {
+        "z0": 50, "vf": 0.695, "od_mm": 4.95,
+        "cap_pf_m": 95.1, "shield": "double braid",
+        "use": "Mil-spec, high temp (up to 200°C), PTFE dielectric",
+        "atten": {100e6: 11.5, 1e9: 39.4, 3e9: 72.2, 10e9: 145.0},
+    },
+    "RG-174": {
+        "z0": 50, "vf": 0.66, "od_mm": 2.79,
+        "cap_pf_m": 100.1, "shield": "braid",
+        "use": "Miniature 50Ω, GPS antennas, IoT, tight spaces",
+        "atten": {100e6: 26.2, 400e6: 52.5, 1e9: 88.6},
+    },
+    "RG-213": {
+        "z0": 50, "vf": 0.66, "od_mm": 10.29,
+        "cap_pf_m": 100.1, "shield": "braid",
+        "use": "HF/VHF/UHF ham radio, mil-spec upgrade of RG-8",
+        "atten": {100e6: 6.6, 400e6: 14.1, 1e9: 24.0},
+    },
+    "RG-316": {
+        "z0": 50, "vf": 0.695, "od_mm": 2.49,
+        "cap_pf_m": 95.1, "shield": "single braid",
+        "use": "Thin PTFE, RF pigtails, internal equipment wiring",
+        "atten": {100e6: 24.6, 1e9: 85.3, 3e9: 156.2},
+    },
+    "LMR-195": {
+        "z0": 50, "vf": 0.83, "od_mm": 4.95,
+        "cap_pf_m": 75.1, "shield": "foil+braid",
+        "use": "Wi-Fi, cellular, IoT — low-loss replacement for RG-58",
+        "atten": {100e6: 8.9, 400e6: 18.4, 900e6: 27.9, 2.4e9: 47.9},
+    },
+    "LMR-240": {
+        "z0": 50, "vf": 0.84, "od_mm": 6.10,
+        "cap_pf_m": 73.8, "shield": "foil+braid",
+        "use": "Cellular, Wi-Fi AP, moderate-length RF runs",
+        "atten": {100e6: 7.0, 400e6: 14.4, 900e6: 21.7, 2.4e9: 37.1},
+    },
+    "LMR-400": {
+        "z0": 50, "vf": 0.85, "od_mm": 10.29,
+        "cap_pf_m": 77.4, "shield": "foil+braid",
+        "use": "Low-loss, cellular towers, long Wi-Fi runs, ham radio",
+        "atten": {100e6: 3.9, 400e6: 7.8, 900e6: 11.8, 2.4e9: 22.0, 5.8e9: 36.8},
+    },
+    "LMR-600": {
+        "z0": 50, "vf": 0.87, "od_mm": 14.99,
+        "cap_pf_m": 75.8, "shield": "foil+braid",
+        "use": "Very low-loss, long cellular/Wi-Fi backbone, rooftop",
+        "atten": {100e6: 2.7, 400e6: 5.4, 900e6: 8.1, 2.4e9: 14.3, 5.8e9: 24.0},
+    },
+}
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -431,6 +515,113 @@ def cmd_smith(args):
         print(f"\n  ⚠ High mismatch — consider matching network")
 
 
+def _interp_atten(atten_data: dict, freq: float) -> Optional[float]:
+    """Interpolate attenuation from frequency/dB-per-100m data points."""
+    freqs = sorted(atten_data.keys())
+    if freq <= freqs[0]:
+        # Extrapolate down using sqrt relationship (attenuation ∝ √f for skin effect)
+        return atten_data[freqs[0]] * math.sqrt(freq / freqs[0])
+    if freq >= freqs[-1]:
+        return atten_data[freqs[-1]] * math.sqrt(freq / freqs[-1])
+
+    # Find bracketing points and interpolate
+    for i in range(len(freqs) - 1):
+        if freqs[i] <= freq <= freqs[i + 1]:
+            f1, f2 = freqs[i], freqs[i + 1]
+            a1, a2 = atten_data[f1], atten_data[f2]
+            # Log-linear interpolation
+            ratio = math.log(freq / f1) / math.log(f2 / f1)
+            return a1 + (a2 - a1) * ratio
+    return None
+
+
+def cmd_coax(args):
+    """Look up coaxial cable specs and calculate loss at a given frequency/distance."""
+    cable_name = args.cable.upper().replace("_", "-")
+
+    # Try exact match first, then partial
+    cable = None
+    for name, data in COAX_DB.items():
+        if name.upper() == cable_name:
+            cable = (name, data)
+            break
+
+    if not cable:
+        for name, data in COAX_DB.items():
+            if cable_name in name.upper() or name.upper() in cable_name:
+                cable = (name, data)
+                break
+
+    if not cable:
+        if args.cable.lower() == "list":
+            _header("Available Coaxial Cables")
+            print(f"  {'Cable':<12} {'Z₀':>5} {'VF':>6} {'OD':>8} {'Use'}")
+            print(f"  {'─'*12} {'─'*5} {'─'*6} {'─'*8} {'─'*40}")
+            for name, data in COAX_DB.items():
+                print(f"  {name:<12} {data['z0']:>4}Ω {data['vf']:>5.0%} {data['od_mm']:>6.2f}mm {data['use'][:40]}")
+            print(f"\n  {len(COAX_DB)} cables in database. Use: rf-calc coax <name> [--freq F] [--length L]")
+            return
+        print(f"Error: cable '{args.cable}' not in database. Use 'rf-calc coax list' to see all.", file=sys.stderr)
+        sys.exit(1)
+
+    name, data = cable
+
+    _header(f"Coaxial Cable: {name}")
+    _show("Impedance Z₀", f"{data['z0']} Ω")
+    _show("Velocity factor", f"{data['vf']:.0%}  (vₚ = {_eng(C * data['vf'], 'm/s')})")
+    _show("Outer diameter", f"{data['od_mm']} mm")
+    _show("Capacitance", f"{data['cap_pf_m']} pF/m")
+    _show("Shielding", data['shield'])
+    _show("Typical use", data['use'])
+
+    # Attenuation table
+    print()
+    print("  Attenuation (dB/100m):")
+    for freq, atten in sorted(data['atten'].items()):
+        print(f"    {_eng(freq, 'Hz'):>10}: {atten:.1f} dB/100m")
+
+    # If frequency specified, calculate at that frequency
+    if args.freq:
+        f = _parse_freq(args.freq)
+        atten_100m = _interp_atten(data['atten'], f)
+        vp = C * data['vf']
+        wavelength = vp / f
+
+        print()
+        _show("At frequency", _eng(f, "Hz"))
+        _show("Wavelength (in cable)", _eng(wavelength, "m"))
+
+        if atten_100m is not None:
+            _show("Attenuation", f"{atten_100m:.2f} dB/100m")
+
+            if args.length:
+                d = args.length
+                total_loss = atten_100m * d / 100
+                power_out = 10 ** (-total_loss / 10) * 100
+                _show("Cable length", _eng(d, "m"))
+                _show("Total loss", f"{total_loss:.2f} dB")
+                _show("Power at far end", f"{power_out:.1f}% of input")
+                _show("Electrical length", f"{d / wavelength:.2f}λ")
+
+                # Compare with other cables at same freq/length
+                print()
+                print("  Cable comparison at same freq/length:")
+                print(f"    {'Cable':<12} {'Loss':>8} {'Power out':>10} {'Z₀':>5}")
+                print(f"    {'─'*12} {'─'*8} {'─'*10} {'─'*5}")
+                comparisons = []
+                for cname, cdata in COAX_DB.items():
+                    if cdata['z0'] == data['z0']:  # same impedance family
+                        ca = _interp_atten(cdata['atten'], f)
+                        if ca:
+                            cl = ca * d / 100
+                            cp = 10 ** (-cl / 10) * 100
+                            comparisons.append((cname, cl, cp, cdata['z0']))
+                comparisons.sort(key=lambda x: x[1])
+                for cname, cl, cp, cz in comparisons:
+                    marker = " ◀" if cname == name else ""
+                    print(f"    {cname:<12} {cl:>7.2f}dB {cp:>9.1f}% {cz:>4}Ω{marker}")
+
+
 # ── CLI Setup ──────────────────────────────────────────────────────────────────
 
 def build_parser():
@@ -451,6 +642,9 @@ examples:
   rf-calc loss --freq 2.4G --distance 100  Free-space loss at 100m
   rf-calc smith --z 100+j50             Normalize for Smith Chart (default Z₀=50Ω)
   rf-calc input-z --zl 100+j50 --z0 50 --freq 1G --distance 0.1
+  rf-calc coax list                      Show all cables in database
+  rf-calc coax RG-58 --freq 2.4G        RG-58 specs + loss at 2.4 GHz
+  rf-calc coax LMR-400 --freq 900M --length 30  Total loss for 30m LMR-400
         """
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -521,6 +715,13 @@ examples:
     p.add_argument("--z", required=True, help="Impedance to normalize (e.g., 100+j50)")
     p.add_argument("--z0", help="Reference impedance (default: 50Ω)")
     p.set_defaults(func=cmd_smith)
+
+    # coaxial cable lookup
+    p = sub.add_parser("coax", help="Coaxial cable specs + loss calculator (13 cables)", aliases=["cable"])
+    p.add_argument("cable", help="Cable type (e.g., RG-58, LMR-400) or 'list'")
+    p.add_argument("--freq", help="Frequency for loss calculation")
+    p.add_argument("--length", type=float, help="Cable length in meters")
+    p.set_defaults(func=cmd_coax)
 
     return parser
 
