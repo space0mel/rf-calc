@@ -13,7 +13,7 @@ import math
 import sys
 from typing import Optional
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 C = 299_792_458        # speed of light in vacuum (m/s)
@@ -591,6 +591,170 @@ def cmd_link_budget(args):
             print(f"  📏 Maximum range: {_eng(max_d, 'm')} (0 dB margin)")
 
 
+def cmd_fresnel(args):
+    """Calculate Fresnel zone radius at any point along a path."""
+    f = _parse_freq(args.freq)
+    d_total = args.distance
+    n = args.zone  # Fresnel zone number
+
+    lam = C / f
+
+    if args.point is not None:
+        d1 = args.point
+        d2 = d_total - d1
+        if d1 <= 0 or d2 <= 0:
+            print("Error: point must be between 0 and total distance")
+            sys.exit(1)
+        r_n = math.sqrt(n * lam * d1 * d2 / d_total)
+
+        _header(f"Fresnel Zone {n}")
+        _show("Frequency", _eng(f, "Hz"))
+        _show("Total path", _eng(d_total, "m"))
+        _show("Point at", _eng(d1, "m"))
+        _show("Wavelength", _eng(lam, "m"))
+        _show(f"F{n} radius at point", _eng(r_n, "m"))
+        print(f"\n  60% clearance (practical minimum): {_eng(0.6 * r_n, 'm')}")
+    else:
+        # Max radius at midpoint
+        d1 = d_total / 2
+        d2 = d_total / 2
+        r_n_max = math.sqrt(n * lam * d1 * d2 / d_total)
+
+        _header(f"Fresnel Zone {n}")
+        _show("Frequency", _eng(f, "Hz"))
+        _show("Total path", _eng(d_total, "m"))
+        _show("Wavelength", _eng(lam, "m"))
+        _show(f"F{n} max radius (midpoint)", _eng(r_n_max, "m"))
+        print(f"\n  60% clearance (practical minimum): {_eng(0.6 * r_n_max, 'm')}")
+
+        # Show table of radii at 10%, 20%, ... 90%
+        print(f"\n  Radius along path:")
+        print(f"  {'Position':>10}  {'Distance':>10}  {'Radius':>10}")
+        print(f"  {'─' * 10}  {'─' * 10}  {'─' * 10}")
+        for pct in [10, 20, 30, 40, 50, 60, 70, 80, 90]:
+            p_d1 = d_total * pct / 100
+            p_d2 = d_total - p_d1
+            r = math.sqrt(n * lam * p_d1 * p_d2 / d_total)
+            print(f"  {pct:>9}%  {_eng(p_d1, 'm'):>10}  {_eng(r, 'm'):>10}")
+
+
+def cmd_noise(args):
+    """Calculate cascaded noise figure for a receiver chain."""
+    # Parse stages: each stage is "gain_dB,nf_dB"
+    stages = []
+    for s in args.stages:
+        parts = s.split(",")
+        if len(parts) != 2:
+            print(f"Error: stage '{s}' must be 'gain_dB,nf_dB' (e.g., '20,1.5')")
+            sys.exit(1)
+        gain_db, nf_db = float(parts[0]), float(parts[1])
+        stages.append((gain_db, nf_db))
+
+    if not stages:
+        print("Error: at least one stage required")
+        sys.exit(1)
+
+    # Convert to linear
+    gains_lin = [10 ** (g / 10) for g, _ in stages]
+    nfs_lin = [10 ** (nf / 10) for _, nf in stages]
+
+    # Friis noise formula: F_total = F1 + (F2-1)/G1 + (F3-1)/(G1*G2) + ...
+    f_total = nfs_lin[0]
+    cumulative_gain = gains_lin[0]
+    for i in range(1, len(stages)):
+        f_total += (nfs_lin[i] - 1) / cumulative_gain
+        cumulative_gain *= gains_lin[i]
+
+    nf_total_db = 10 * math.log10(f_total)
+    total_gain_db = sum(g for g, _ in stages)
+
+    # Noise temperature
+    t_ref = args.t_ref if args.t_ref else 290  # K
+    t_noise = t_ref * (f_total - 1)
+
+    _header("Cascaded Noise Figure")
+
+    print("  STAGES")
+    print(f"  {'#':>3}  {'Gain (dB)':>10}  {'NF (dB)':>10}  {'Component':>15}")
+    print(f"  {'─' * 3}  {'─' * 10}  {'─' * 10}  {'─' * 15}")
+    for i, (g, nf) in enumerate(stages):
+        label = args.labels[i] if args.labels and i < len(args.labels) else f"Stage {i+1}"
+        print(f"  {i+1:>3}  {g:>+10.1f}  {nf:>10.1f}  {label:>15}")
+
+    print()
+    print("  RESULTS")
+    _show("Total gain", f"{total_gain_db:+.1f} dB ({_eng(cumulative_gain, '')}x)")
+    _show("Cascaded NF", f"{nf_total_db:.2f} dB (F = {f_total:.3f})")
+    _show("Noise temperature", f"{t_noise:.1f} K (T_ref = {t_ref} K)")
+    _show("Sensitivity impact", f"First stage dominates — its NF of {stages[0][1]:.1f} dB contributes most")
+
+    if len(stages) >= 2:
+        # Show what happens if we swap stages 1 and 2
+        f_swapped = nfs_lin[1]
+        f_swapped += (nfs_lin[0] - 1) / gains_lin[1]
+        nf_swapped_db = 10 * math.log10(f_swapped)
+        print(f"\n  ⚠ If stages 1 & 2 were swapped: NF would be {nf_swapped_db:.2f} dB"
+              f" ({'worse' if nf_swapped_db > nf_total_db else 'better'} by"
+              f" {abs(nf_swapped_db - nf_total_db):.2f} dB)")
+
+
+def cmd_antenna(args):
+    """Calculate antenna element lengths for common antenna types."""
+    f = _parse_freq(args.freq)
+    lam = C / f
+
+    # Apply velocity factor if specified
+    vf = args.vf if args.vf else 1.0
+
+    _header("Antenna Calculator")
+    _show("Frequency", _eng(f, "Hz"))
+    _show("Free-space wavelength", _eng(lam, "m"))
+    if vf != 1.0:
+        _show("Velocity factor", f"{vf:.2f}")
+        _show("Effective wavelength", _eng(lam * vf, "m"))
+
+    lam_eff = lam * vf
+
+    print()
+    print("  ELEMENT LENGTHS")
+    print(f"  {'Type':30s}  {'Length':>12}  {'Formula'}")
+    print(f"  {'─' * 30}  {'─' * 12}  {'─' * 15}")
+
+    elements = [
+        ("Full wave (λ)", lam_eff, "λ"),
+        ("Half-wave dipole (λ/2)", lam_eff / 2, "λ/2"),
+        ("Quarter-wave monopole (λ/4)", lam_eff / 4, "λ/4"),
+        ("5/8 wave (5λ/8)", 5 * lam_eff / 8, "5λ/8"),
+        ("Folded dipole", lam_eff / 2, "λ/2"),
+    ]
+
+    for name, length, formula in elements:
+        print(f"  {name:30s}  {_eng(length, 'm'):>12}  {formula}")
+
+    # Practical wire antenna (with 0.95 correction factor)
+    print()
+    print("  PRACTICAL LENGTHS (×0.95 correction for wire thickness)")
+    for name, length, formula in elements[:4]:
+        print(f"  {name:30s}  {_eng(length * 0.95, 'm'):>12}")
+
+    # Antenna impedance reference
+    print()
+    print("  REFERENCE IMPEDANCES")
+    print(f"  {'Half-wave dipole':30s}  {'73 + j42.5 Ω (theoretical)':>30}")
+    print(f"  {'Quarter-wave monopole':30s}  {'36.5 + j21.25 Ω (over ground)':>30}")
+    print(f"  {'Folded dipole':30s}  {'292 Ω (4× half-wave)':>30}")
+    print(f"  {'5/8 wave':30s}  {'~50 Ω (with matching network)':>30}")
+
+    if args.gain:
+        print()
+        print("  THEORETICAL GAIN")
+        print(f"  {'Isotropic':30s}  {'0 dBi'}")
+        print(f"  {'Half-wave dipole':30s}  {'2.15 dBi'}")
+        print(f"  {'Quarter-wave monopole':30s}  {'5.15 dBi (over perfect ground)'}")
+        print(f"  {'5/8 wave':30s}  {'3.2 dBi'}")
+        print(f"  {'Folded dipole':30s}  {'2.15 dBi'}")
+
+
 def _interp_atten(atten_data: dict, freq: float) -> Optional[float]:
     """Interpolate attenuation from frequency/dB-per-100m data points."""
     freqs = sorted(atten_data.keys())
@@ -719,6 +883,9 @@ examples:
   rf-calc smith --z 100+j50             Normalize for Smith Chart (default Z₀=50Ω)
   rf-calc input-z --zl 100+j50 --z0 50 --freq 1G --distance 0.1
   rf-calc link-budget --freq 2.4G --distance 1000 --tx-power 20 --tx-gain 6 --rx-gain 3 --rx-sensitivity -80
+  rf-calc fresnel --freq 5.8G --distance 10000     Fresnel zone for 10 km at 5.8 GHz
+  rf-calc noise 20,1.5 -3,3 30,5 --labels LNA Filter Mixer  Cascaded noise figure
+  rf-calc antenna --freq 146M --gain               2m ham antenna lengths + gains
   rf-calc coax list                      Show all cables in database
   rf-calc coax RG-58 --freq 2.4G        RG-58 specs + loss at 2.4 GHz
   rf-calc coax LMR-400 --freq 900M --length 30  Total loss for 30m LMR-400
@@ -805,6 +972,28 @@ examples:
     p.add_argument("--rx-sensitivity", type=float, help="Receiver sensitivity (dBm) — enables margin calc")
     p.add_argument("--misc-loss", type=float, help="Additional losses (dB, default: 0)")
     p.set_defaults(func=cmd_link_budget)
+
+    # fresnel zone
+    p = sub.add_parser("fresnel", help="Fresnel zone radius calculator")
+    p.add_argument("--freq", required=True, help="Frequency")
+    p.add_argument("--distance", type=float, required=True, help="Total path distance (m)")
+    p.add_argument("--zone", type=int, default=1, help="Fresnel zone number (default: 1)")
+    p.add_argument("--point", type=float, help="Distance from Tx to calculate radius (m). Default: show full table")
+    p.set_defaults(func=cmd_fresnel)
+
+    # noise figure
+    p = sub.add_parser("noise", help="Cascaded noise figure (Friis formula)", aliases=["nf"])
+    p.add_argument("stages", nargs="+", help="Stages as 'gain_dB,nf_dB' (e.g., '20,1.5' '-3,3' '30,5')")
+    p.add_argument("--labels", nargs="+", help="Stage labels (e.g., 'LNA' 'Filter' 'Mixer')")
+    p.add_argument("--t-ref", type=float, help="Reference temperature in K (default: 290)")
+    p.set_defaults(func=cmd_noise)
+
+    # antenna calculator
+    p = sub.add_parser("antenna", help="Antenna element length calculator", aliases=["ant"])
+    p.add_argument("--freq", required=True, help="Frequency")
+    p.add_argument("--vf", type=float, help="Velocity factor (default: 1.0)")
+    p.add_argument("--gain", action="store_true", help="Show theoretical gain table")
+    p.set_defaults(func=cmd_antenna)
 
     # coaxial cable lookup
     p = sub.add_parser("coax", help="Coaxial cable specs + loss calculator (13 cables)", aliases=["cable"])
