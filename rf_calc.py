@@ -13,7 +13,7 @@ import math
 import sys
 from typing import Optional
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 C = 299_792_458        # speed of light in vacuum (m/s)
@@ -862,6 +862,137 @@ def cmd_coax(args):
                     print(f"    {cname:<12} {cl:>7.2f}dB {cp:>9.1f}% {cz:>4}Ω{marker}")
 
 
+
+
+# ── Modulation Calculations ────────────────────────────────────────────────────
+
+def am_bandwidth(fm: float) -> float:
+    """AM double sideband bandwidth: BW = 2 × fm"""
+    return 2 * fm
+
+
+def fm_bandwidth_carson(fm: float, beta: float) -> float:
+    """Carson's rule for FM bandwidth: BW ≈ 2fm(β + 1)"""
+    return 2 * fm * (beta + 1)
+
+
+def nyquist_bandwidth(symbol_rate: float) -> float:
+    """Nyquist bandwidth (ideal): BW = Rs/2"""
+    return symbol_rate / 2
+
+
+def occupied_bandwidth(symbol_rate: float, rolloff: float = 0.35) -> float:
+    """Occupied bandwidth with raised cosine filter: BW = Rs(1 + α)"""
+    return symbol_rate * (1 + rolloff)
+
+
+def spectral_efficiency(bits_per_sym: int, rolloff: float = 0.35) -> float:
+    """Spectral efficiency: η = k / (1 + α) bits/s/Hz"""
+    return bits_per_sym / (1 + rolloff)
+
+
+def bits_per_symbol_lookup(scheme: str) -> Optional[int]:
+    """Return bits per symbol for common digital modulation schemes."""
+    schemes = {
+        'BPSK': 1, '2PSK': 1,
+        'QPSK': 2, '4PSK': 2,
+        '8PSK': 3,
+        '16PSK': 4,
+        'ASK': 1, 'BASK': 1,
+        'FSK': 1, 'BFSK': 1,
+        '4FSK': 2, '8FSK': 3,
+        '16QAM': 4,
+        '32QAM': 5,
+        '64QAM': 6,
+        '128QAM': 7,
+        '256QAM': 8,
+        '1024QAM': 10,
+    }
+    return schemes.get(scheme.upper(), None)
+
+
+def cmd_modulation(args):
+    """Calculate modulation parameters: bandwidth, symbol/bit rates, spectral efficiency."""
+    
+    if args.type == 'am':
+        fm = _parse_freq(args.message_freq)
+        bw = am_bandwidth(fm)
+        
+        _header("AM Modulation (Double Sideband)")
+        _show("Message frequency (fm)", _eng(fm, "Hz"))
+        _show("Bandwidth (DSB)", _eng(bw, "Hz"))
+        _show("Formula", "BW = 2 × fm")
+        
+    elif args.type == 'fm':
+        fm = _parse_freq(args.message_freq)
+        delta_f = _parse_freq(args.deviation)
+        beta = delta_f / fm
+        bw = fm_bandwidth_carson(fm, beta)
+        
+        _header("FM Modulation (Carson's Rule)")
+        _show("Message frequency (fm)", _eng(fm, "Hz"))
+        _show("Frequency deviation (Δf)", _eng(delta_f, "Hz"))
+        _show("Modulation index (β)", f"{beta:.2f}")
+        _show("Bandwidth (Carson)", _eng(bw, "Hz"))
+        _show("Formula", "BW ≈ 2(Δf + fm) = 2fm(β + 1)")
+        
+        if beta > 2:
+            print("\n  Note: β > 2 = wideband FM (broadcast)")
+        elif beta < 1:
+            print("\n  Note: β < 1 = narrowband FM (two-way radio)")
+            
+    elif args.type == 'digital':
+        if args.compare:
+            # Comparison table mode
+            bitrate = _parse_freq(args.bitrate)
+            rolloff = args.rolloff
+            
+            _header(f"Digital Modulation Comparison ({_eng(bitrate, 'bps')})")
+            print(f"  {'Scheme':<10} {'k':<3} {'Rs (sps)':<12} {'BW (Hz)':<12} {'η (b/s/Hz)':<10}")
+            print(f"  {'─'*10} {'─'*3} {'─'*12} {'─'*12} {'─'*10}")
+            
+            schemes = ['BPSK', 'QPSK', '8PSK', '16QAM', '64QAM', '256QAM']
+            for scheme in schemes:
+                k = bits_per_symbol_lookup(scheme)
+                rs = bitrate / k
+                bw = occupied_bandwidth(rs, rolloff)
+                eff = spectral_efficiency(k, rolloff)
+                print(f"  {scheme:<10} {k:<3} {_eng(rs, ''):>12} {_eng(bw, ''):>12} {eff:<10.2f}")
+                
+            print(f"\n  Notes:")
+            print(f"    - Raised cosine filter α = {rolloff}")
+            print(f"    - Higher-order schemes need better SNR")
+            print(f"    - Nyquist BW (ideal) = Rs/2, occupied BW = Rs(1+α)")
+            
+        else:
+            # Single scheme mode
+            scheme = args.scheme.upper()
+            k = bits_per_symbol_lookup(scheme)
+            
+            if k is None:
+                print(f"Error: unknown scheme '{args.scheme}'", file=sys.stderr)
+                print("Supported: BPSK, QPSK, 8PSK, 16QAM, 32QAM, 64QAM, 128QAM, 256QAM, ASK, FSK", file=sys.stderr)
+                sys.exit(1)
+            
+            bitrate = _parse_freq(args.bitrate)
+            rolloff = args.rolloff
+            rs = bitrate / k
+            bw_nyquist = nyquist_bandwidth(rs)
+            bw_occupied = occupied_bandwidth(rs, rolloff)
+            eff = spectral_efficiency(k, rolloff)
+            
+            _header(f"Digital Modulation: {scheme}")
+            _show("Bit rate (Rb)", _eng(bitrate, "bps"))
+            _show("Modulation", f"{scheme} ({k} bits/symbol)")
+            _show("Symbol rate (Rs)", f"{_eng(rs, 'sps')} (= Rb / {k})")
+            _show("Nyquist BW (ideal)", f"{_eng(bw_nyquist, 'Hz')} (= Rs / 2)")
+            _show("Occupied BW (α={})".format(rolloff), f"{_eng(bw_occupied, 'Hz')} (= Rs × {1+rolloff:.2f})")
+            _show("Spectral efficiency", f"{eff:.2f} bits/s/Hz")
+            
+            print("\n  Note: Nyquist BW assumes ideal brick-wall filter (impractical)")
+            print(f"        Occupied BW uses raised cosine filter (typical for modern systems)")
+
+
 # ── CLI Setup ──────────────────────────────────────────────────────────────────
 
 def build_parser():
@@ -889,6 +1020,10 @@ examples:
   rf-calc coax list                      Show all cables in database
   rf-calc coax RG-58 --freq 2.4G        RG-58 specs + loss at 2.4 GHz
   rf-calc coax LMR-400 --freq 900M --length 30  Total loss for 30m LMR-400
+  rf-calc modulation --type am --message-freq 5k  AM bandwidth (DSB)
+  rf-calc modulation --type fm --message-freq 15k --deviation 75k  FM Carson's rule
+  rf-calc modulation --type digital --scheme qpsk --bitrate 1M  QPSK parameters
+  rf-calc modulation --type digital --bitrate 1M --compare  Compare schemes at 1 Mbps
         """
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -1001,6 +1136,17 @@ examples:
     p.add_argument("--freq", help="Frequency for loss calculation")
     p.add_argument("--length", type=float, help="Cable length in meters")
     p.set_defaults(func=cmd_coax)
+
+    # modulation calculator
+    p = sub.add_parser("modulation", help="Modulation bandwidth & spectral efficiency calculator", aliases=["mod"])
+    p.add_argument("--type", choices=['am', 'fm', 'digital'], required=True, help="Modulation type")
+    p.add_argument("--message-freq", help="Message frequency (for AM/FM)")
+    p.add_argument("--deviation", help="Frequency deviation (for FM)")
+    p.add_argument("--scheme", help="Modulation scheme (for digital): BPSK, QPSK, 8PSK, 16QAM, 64QAM, 256QAM, etc.")
+    p.add_argument("--bitrate", help="Bit rate (for digital, e.g., 1M, 10M)")
+    p.add_argument("--rolloff", type=float, default=0.35, help="Raised cosine rolloff factor (default: 0.35)")
+    p.add_argument("--compare", action="store_true", help="Compare multiple schemes at given bitrate")
+    p.set_defaults(func=cmd_modulation)
 
     return parser
 

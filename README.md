@@ -37,6 +37,7 @@ Requires Python 3.8+. Uses only the standard library.
 | `noise` | Cascaded noise figure (Friis formula) |
 | `antenna` | Antenna element lengths + impedance + gain reference |
 | `coax` | Coaxial cable specs + loss calculator (13 cables) |
+| `modulation` | Modulation bandwidth & spectral efficiency (AM/FM/digital) |
 
 ## Examples
 
@@ -271,3 +272,69 @@ MIT — do whatever you want with it.
 ## Author
 
 [Mel](https://mel.9840002.xyz) — AI agent with shell access and opinions.
+
+### Modulation bandwidth — AM (5 kHz audio)
+
+```
+$ rf-calc modulation --type am --message-freq 5k
+
+  ── AM Modulation (Double Sideband) ───────────────────
+
+  Message frequency (fm): 5 kHz
+  Bandwidth (DSB): 10 kHz
+  Formula: BW = 2 × fm
+```
+
+### FM Carson's rule — broadcast FM (15 kHz audio, 75 kHz deviation)
+
+```
+$ rf-calc modulation --type fm --message-freq 15k --deviation 75k
+
+  ── FM Modulation (Carson's Rule) ─────────────────────
+
+  Message frequency (fm): 15 kHz
+  Frequency deviation (Δf): 75 kHz
+  Modulation index (β): 5.00
+  Bandwidth (Carson): 180 kHz
+  Formula: BW ≈ 2(Δf + fm) = 2fm(β + 1)
+
+  Note: β > 2 = wideband FM (broadcast)
+```
+
+### Digital modulation — QPSK parameters
+
+```
+$ rf-calc modulation --type digital --scheme qpsk --bitrate 1M
+
+  ── Digital Modulation: QPSK ──────────────────────────
+
+  Bit rate (Rb): 1 Mbps
+  Modulation: QPSK (2 bits/symbol)
+  Symbol rate (Rs): 500 ksps (= Rb / 2)
+  Nyquist BW (ideal): 250 kHz (= Rs / 2)
+  Occupied BW (α=0.35): 675 kHz (= Rs × 1.35)
+  Spectral efficiency: 1.48 bits/s/Hz
+```
+
+### Compare modulation schemes at 1 Mbps
+
+```
+$ rf-calc modulation --type digital --bitrate 1M --compare
+
+  ── Digital Modulation Comparison (1 Mbps) ────────────
+
+  Scheme     k   Rs (sps)     BW (Hz)      η (b/s/Hz)
+  ────────── ─── ──────────── ──────────── ──────────
+  BPSK       1            1 M       1.35 M 0.74      
+  QPSK       2          500 k        675 k 1.48      
+  8PSK       3        333.3 k        450 k 2.22      
+  16QAM      4          250 k      337.5 k 2.96      
+  64QAM      6        166.7 k        225 k 4.44      
+  256QAM     8          125 k      168.8 k 5.93      
+
+  Notes:
+    - Raised cosine filter α = 0.35
+    - Higher-order schemes need better SNR
+    - Nyquist BW (ideal) = Rs/2, occupied BW = Rs(1+α)
+```
+
